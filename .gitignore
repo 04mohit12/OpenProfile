@@ -218,3 +218,16 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# OpenProfile uploaded data and generated files
+data/sources/
+*.bak
+backend/app/main_backup.py
+
+# Local environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Local profiler backup
+backend/app/core/profiler.py.backup
