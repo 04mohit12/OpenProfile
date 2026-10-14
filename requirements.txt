@@ -10,3 +10,4 @@ pytest
 pyarrow
 itsdangerous==2.2.0
 python-dotenv
+email-validator

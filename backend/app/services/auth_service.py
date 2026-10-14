@@ -20,10 +20,49 @@ OTP_RESEND_COOLDOWN_SECONDS = 60
 OTP_MAX_ATTEMPTS = 5
 SESSION_TTL_SECONDS = 8 * 60 * 60
 
+OTP_RATE_WINDOW_SECONDS = 60 * 60
+EMAIL_OTP_HOURLY_LIMIT = 5
+IP_OTP_HOURLY_LIMIT = 10
+
 _lock = threading.RLock()
 _otps = {}
 _sessions = {}
 _last_otp_request = {}
+
+_email_otp_requests = {}
+_ip_otp_requests = {}
+_otp_request_generation = {}
+
+def _cleanup_expired_auth_state(now: float) -> None:
+    """Remove expired authentication and rate-limit records.
+
+    Must be called while holding _lock.
+    """
+
+    for email, record in list(_otps.items()):
+        if now >= record["expires"]:
+            _otps.pop(email, None)
+
+    for session_id, record in list(_sessions.items()):
+        if now >= record["expires"]:
+            _sessions.pop(session_id, None)
+
+    for key, timestamp in list(_last_otp_request.items()):
+        if now - timestamp >= OTP_RESEND_COOLDOWN_SECONDS:
+            _last_otp_request.pop(key, None)
+
+    for store in (_email_otp_requests, _ip_otp_requests):
+        for key, timestamps in list(store.items()):
+            valid = [
+                timestamp
+                for timestamp in timestamps
+                if now - timestamp < OTP_RATE_WINDOW_SECONDS
+            ]
+
+            if valid:
+                store[key] = valid
+            else:
+                store.pop(key, None)
 
 
 def _setting(name: str, default: str = "") -> str:
@@ -101,6 +140,7 @@ If you did not request this code, you can ignore this email.
 
 
 
+
 def request_otp(email: str, client_ip: str = "unknown") -> None:
     """Send an OTP to an approved email address.
 
@@ -119,34 +159,86 @@ def request_otp(email: str, client_ip: str = "unknown") -> None:
     request_key = (normalized, client_ip)
 
     with _lock:
+        _cleanup_expired_auth_state(now)
+
+        email_requests = [
+            timestamp
+            for timestamp in _email_otp_requests.get(normalized, [])
+            if now - timestamp < OTP_RATE_WINDOW_SECONDS
+        ]
+        ip_requests = [
+            timestamp
+            for timestamp in _ip_otp_requests.get(client_ip, [])
+            if now - timestamp < OTP_RATE_WINDOW_SECONDS
+        ]
+
+        _email_otp_requests[normalized] = email_requests
+        _ip_otp_requests[client_ip] = ip_requests
+
         previous = _last_otp_request.get(request_key, 0)
         if now - previous < OTP_RESEND_COOLDOWN_SECONDS:
             raise ValueError(
                 "Please wait before requesting another verification code."
             )
 
-        # Reserve the cooldown before sending to limit concurrent requests.
+        if len(email_requests) >= EMAIL_OTP_HOURLY_LIMIT:
+            raise ValueError(
+                "Too many verification requests for this email. Try again later."
+            )
+
+        if len(ip_requests) >= IP_OTP_HOURLY_LIMIT:
+            raise ValueError(
+                "Too many verification requests from this address. Try again later."
+            )
+
+        # Reserve the request before sending to limit concurrent requests.
         _last_otp_request[request_key] = now
+        reservation_time = now
+        request_id = secrets.token_urlsafe(16)
+        _otp_request_generation[normalized] = request_id
+        _email_otp_requests[normalized] = email_requests + [now]
+        _ip_otp_requests[client_ip] = ip_requests + [now]
 
     otp = f"{secrets.randbelow(1_000_000):06d}"
     salt = secrets.token_hex(16)
 
     try:
         _send_otp_email(normalized, otp)
+
     except Exception:
         with _lock:
-            _last_otp_request.pop(request_key, None)
+            # Remove only the reservation created by this request.
+            if _last_otp_request.get(request_key) == reservation_time:
+                _last_otp_request.pop(request_key, None)
+
+            _email_otp_requests[normalized] = [
+                timestamp
+                for timestamp in _email_otp_requests.get(normalized, [])
+                if timestamp != reservation_time
+            ]
+            _ip_otp_requests[client_ip] = [
+                timestamp
+                for timestamp in _ip_otp_requests.get(client_ip, [])
+                if timestamp != reservation_time
+            ]
+
         raise RuntimeError(
             "Unable to send the verification email. Please try again later."
         ) from None
 
+
     with _lock:
+    # Only the latest request may register a valid OTP.
+        if _otp_request_generation.get(normalized) != request_id:
+            return
+
         _otps[normalized] = {
             "digest": _otp_digest(normalized, otp, salt),
             "salt": salt,
-            "expires": now + OTP_TTL_SECONDS,
+            "expires": time.time() + OTP_TTL_SECONDS,
             "attempts": 0,
         }
+
 
 
 def verify_otp(email: str, otp: str) -> bool:

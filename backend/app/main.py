@@ -9,7 +9,7 @@ import polars as pl
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 
@@ -65,12 +65,12 @@ def home():
 # --------------------------------------------------
 
 class OTPRequest(BaseModel):
-    email: str
+    email: EmailStr
 
 
 class OTPVerifyRequest(BaseModel):
-    email: str
-    otp: str
+    email: EmailStr
+    otp: str = Field(pattern=r"^\d{6}$")
 
 class ExcelProfileRequest(BaseModel):
     source_id: str
