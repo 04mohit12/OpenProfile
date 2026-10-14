@@ -2,7 +2,166 @@
 
 const API_BASE = "/api/v1";
 
+
+const loginElements = {
+  screen: document.getElementById("loginScreen"),
+  title: document.getElementById("loginTitle"),
+  description: document.getElementById("loginDescription"),
+  emailForm: document.getElementById("requestOtpForm"),
+  email: document.getElementById("loginEmail"),
+  requestButton: document.getElementById("requestOtpButton"),
+  otpForm: document.getElementById("verifyOtpForm"),
+  otp: document.getElementById("loginOtp"),
+  verifyButton: document.getElementById("verifyOtpButton"),
+  backButton: document.getElementById("backToEmailButton"),
+  message: document.getElementById("loginMessage"),
+};
+
+function showLoginMessage(message, type = "") {
+  loginElements.message.textContent = message || "";
+  loginElements.message.classList.remove("error", "success");
+
+  if (type) {
+    loginElements.message.classList.add(type);
+  }
+}
+
+async function authRequest(path, options = {}) {
+  const response = await fetch(`${API_BASE}/auth/${path}`, {
+    credentials: "same-origin",
+    ...options,
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Authentication request failed.");
+  }
+
+  return data;
+}
+
+function showLoginScreen() {
+  loginElements.screen.classList.remove("hidden");
+  document.querySelector(".app-shell").classList.add("hidden");
+}
+
+function showWorkspace() {
+  loginElements.screen.classList.add("hidden");
+  document.querySelector(".app-shell").classList.remove("hidden");
+}
+
+async function checkLoginSession() {
+  try {
+    await authRequest("me");
+    showWorkspace();
+  } catch {
+    showLoginScreen();
+  }
+}
+
+loginElements.emailForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const email = loginElements.email.value.trim();
+  loginElements.requestButton.disabled = true;
+  showLoginMessage("Requesting verification code...");
+
+  try {
+    await authRequest("request-otp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+
+    loginElements.emailForm.classList.add("hidden");
+    loginElements.otpForm.classList.remove("hidden");
+    loginElements.title.textContent = "Check your email";
+    loginElements.description.textContent =
+      "Enter the six-digit verification code sent to your email.";
+    loginElements.otp.focus();
+
+    showLoginMessage(
+      "If this email is approved, a verification code has been sent.",
+      "success"
+    );
+  } catch (error) {
+    showLoginMessage(error.message, "error");
+  } finally {
+    loginElements.requestButton.disabled = false;
+  }
+});
+
+loginElements.otpForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const email = loginElements.email.value.trim();
+  const otp = loginElements.otp.value.trim();
+
+  if (!/^\d{6}$/.test(otp)) {
+    showLoginMessage("Enter the six-digit verification code.", "error");
+    return;
+  }
+
+  loginElements.verifyButton.disabled = true;
+  showLoginMessage("Verifying code...");
+
+  try {
+    await authRequest("verify-otp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, otp }),
+    });
+
+    loginElements.otp.value = "";
+    showWorkspace();
+  } catch (error) {
+    showLoginMessage(error.message, "error");
+  } finally {
+    loginElements.verifyButton.disabled = false;
+  }
+});
+
+loginElements.backButton.addEventListener("click", () => {
+  loginElements.otpForm.classList.add("hidden");
+  loginElements.emailForm.classList.remove("hidden");
+  loginElements.otp.value = "";
+  loginElements.title.textContent = "Sign in to OpenProfile";
+  loginElements.description.textContent =
+    "Enter your approved email address to receive a verification code.";
+  showLoginMessage("");
+});
+
+document.addEventListener("DOMContentLoaded", checkLoginSession);
+
+
 const $ = (id) => document.getElementById(id);
+
+
+const logoutButton = $("logoutButton");
+const signedInEmail = $("signedInEmail");
+
+logoutButton.addEventListener("click", async () => {
+  logoutButton.disabled = true;
+
+  try {
+    await fetch(`${API_BASE}/auth/logout`, {
+      method: "POST",
+      credentials: "same-origin",
+    });
+  } finally {
+    showLoginScreen();
+    loginElements.otpForm.classList.add("hidden");
+    loginElements.emailForm.classList.remove("hidden");
+    loginElements.otp.value = "";
+    loginElements.title.textContent = "Sign in to OpenProfile";
+    loginElements.description.textContent =
+      "Enter your approved email address to receive a verification code.";
+    showLoginMessage("You have been signed out.");
+    logoutButton.disabled = false;
+  }
+});
+
 
 const state = {
   file: null,

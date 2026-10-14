@@ -1,10 +1,16 @@
 
+
 from fastapi.testclient import TestClient
 
 from backend.app import main
 
 
+main.app.dependency_overrides[main.get_authenticated_email] = (
+    lambda: "testuser@example.com"
+)
+
 client = TestClient(main.app)
+
 
 
 PIPE_FILE = (

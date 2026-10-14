@@ -1,4 +1,4 @@
-
+﻿
 from pathlib import Path
 import json
 import os
@@ -6,17 +6,21 @@ import tempfile
 import uuid
 
 import polars as pl
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
+from fastapi import Request, Response
+from fastapi.responses import JSONResponse
+
+from backend.app.services import auth_service
 
 from backend.app.services.delimiter_detector import (
     detect_delimiter_from_file,
 )
 from backend.app.services.file_profiler import profile_csv, profile_excel
 from backend.app.core.profiler import profile_dataframe
-
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").strip().lower() == "true"
 
 # --------------------------------------------------
 # Application configuration
@@ -60,6 +64,14 @@ def home():
 # Request models
 # --------------------------------------------------
 
+class OTPRequest(BaseModel):
+    email: str
+
+
+class OTPVerifyRequest(BaseModel):
+    email: str
+    otp: str
+
 class ExcelProfileRequest(BaseModel):
     source_id: str
     sheet_name: str | None = None
@@ -69,6 +81,123 @@ class ConfirmDelimiterRequest(BaseModel):
     delimiter: str
     confirm_mismatch: bool = False
 
+def get_authenticated_email(request: Request) -> str:
+    """Require a valid OpenProfile session for protected routes."""
+    token = request.cookies.get("openprofile_session")
+
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Please log in to use OpenProfile.",
+        )
+
+    email = auth_service.get_session_email(token)
+
+    if not email:
+        raise HTTPException(
+            status_code=401,
+            detail="Your session is invalid or expired. Please log in again.",
+        )
+
+    return email
+
+
+# --------------------------------------------------
+# Authentication routes
+# --------------------------------------------------
+
+@app.post("/api/v1/auth/request-otp")
+def request_login_otp(
+    payload: OTPRequest,
+    request: Request,
+):
+    """Request a login OTP for an approved email address."""
+    client_ip = (
+        request.client.host if request.client else "unknown"
+    )
+
+    try:
+        auth_service.request_otp(payload.email, client_ip)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=str(exc),
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        ) from exc
+
+    # Use a generic response to avoid revealing allowlist membership.
+    return {
+        "message": (
+            "If this email address is approved, "
+            "a verification code will be sent."
+        )
+    }
+
+
+@app.post("/api/v1/auth/verify-otp")
+def verify_login_otp(
+    payload: OTPVerifyRequest,
+    response: Response,
+):
+    """Verify the OTP and issue an authenticated session."""
+    if not auth_service.verify_otp(payload.email, payload.otp):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired verification code.",
+        )
+
+    try:
+        token = auth_service.create_session(payload.email)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to create a login session.",
+        ) from exc
+
+    response.set_cookie(
+        key="openprofile_session",
+        value=token,
+        httponly=True,
+        secure=COOKIE_SECURE,  # Local development only; enable HTTPS in production.
+        samesite="lax",
+        max_age=auth_service.SESSION_TTL_SECONDS,
+        path="/",
+    )
+
+    return {"message": "Login successful."}
+
+
+@app.post("/api/v1/auth/logout")
+def logout(
+    request: Request,
+    response: Response,
+):
+    """Revoke the current session and clear its cookie."""
+    token = request.cookies.get("openprofile_session")
+
+    if token:
+        auth_service.revoke_session(token)
+
+    response.delete_cookie(
+        key="openprofile_session",
+        path="/",
+        httponly=True,
+        secure=COOKIE_SECURE,  # Local development only.
+        samesite="lax",
+    )
+
+    return {"message": "Logged out successfully."}
+
+
+@app.get("/api/v1/auth/me")
+def get_current_session(request: Request):
+    """Return the current authenticated user's email."""
+    email = get_authenticated_email(request)
+    return {"email": email, "authenticated": True}
 
 # --------------------------------------------------
 # Helper functions
@@ -169,8 +298,12 @@ def health():
 # CSV profiling endpoint
 # --------------------------------------------------
 
+
 @app.post("/api/v1/profile/csv")
-async def profile_uploaded_csv(file: UploadFile = File(...)):
+async def profile_uploaded_csv(
+    file: UploadFile = File(...),
+    email: str = Depends(get_authenticated_email),
+):
     """Upload and profile a CSV file."""
 
     if not file.filename or Path(file.filename).suffix.lower() != ".csv":
@@ -209,13 +342,18 @@ async def profile_uploaded_csv(file: UploadFile = File(...)):
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
 
+
 # --------------------------------------------------
 # Excel upload and worksheet discovery
 # --------------------------------------------------
 
 
+
 @app.post("/api/v1/excel/upload")
-async def upload_excel(file: UploadFile = File(...)):
+async def upload_excel(
+    file: UploadFile = File(...),
+    email: str = Depends(get_authenticated_email),
+):
     """Upload an Excel workbook and return its worksheet names."""
 
     if not file.filename:
@@ -294,8 +432,13 @@ async def upload_excel(file: UploadFile = File(...)):
 
 
 
+
+
 @app.post("/api/v1/excel/profile")
-def profile_excel_worksheet(request: ExcelProfileRequest):
+def profile_excel_worksheet(
+    request: ExcelProfileRequest,
+    email: str = Depends(get_authenticated_email),
+):
     """Profile the selected worksheet from an uploaded workbook."""
 
     try:
@@ -382,13 +525,18 @@ def profile_excel_worksheet(request: ExcelProfileRequest):
             detail=f"Unable to profile Excel worksheet: {exc}",
         ) from exc
 
+
 # --------------------------------------------------
 # TXT upload and delimiter detection
 # --------------------------------------------------
 
 
+
 @app.post("/api/v1/delimiters/detect")
-async def detect_uploaded_txt_delimiter(file: UploadFile = File(...)):
+async def detect_uploaded_txt_delimiter(
+    file: UploadFile = File(...),
+    email: str = Depends(get_authenticated_email),
+):
     """Store a TXT or CSV upload and detect its delimiter."""
 
     if not file.filename:
@@ -458,14 +606,19 @@ async def detect_uploaded_txt_delimiter(file: UploadFile = File(...)):
         await file.close()
 
 
+
 # --------------------------------------------------
 # Confirm delimiter and generate profiling report
 # --------------------------------------------------
 
 
 
+
 @app.post("/api/v1/delimiters/confirm-and-profile")
-def confirm_delimiter_and_profile(request: ConfirmDelimiterRequest):
+def confirm_delimiter_and_profile(
+    request: ConfirmDelimiterRequest,
+    email: str = Depends(get_authenticated_email),
+):
     """Validate a delimited file and generate its profiling report."""
     import csv
 

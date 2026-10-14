@@ -231,3 +231,6 @@ backend/app/main_backup.py
 
 # Local profiler backup
 backend/app/core/profiler.py.backup
+
+# Temporary authentication migration backup
+backend/app/main_before_auth.py

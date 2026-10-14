@@ -8,3 +8,5 @@ xlrd==2.0.2
 httpx
 pytest
 pyarrow
+itsdangerous==2.2.0
+python-dotenv
