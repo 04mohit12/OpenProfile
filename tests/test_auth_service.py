@@ -354,3 +354,36 @@ def test_expired_database_session_is_rejected(monkeypatch):
     result = auth_service.get_session_email(token)
 
     assert result is None
+
+
+def test_revoked_session_cannot_authenticate(monkeypatch):
+    """A revoked session must no longer authenticate."""
+    email = "approved@example.com"
+    session_id = "revoked-test-session"
+    now = int(time.time())
+    sessions = {
+        session_id: (email, time.time() + auth_service.SESSION_TTL_SECONDS)
+    }
+
+    token = auth_service._serializer().dumps({
+        "email": email,
+        "sid": session_id,
+        "iat": now,
+    })
+
+    monkeypatch.setattr(
+        auth_db,
+        "get_session",
+        lambda sid: sessions.get(sid),
+    )
+    monkeypatch.setattr(
+        auth_db,
+        "delete_session",
+        lambda sid: sessions.pop(sid, None),
+    )
+
+    assert auth_service.get_session_email(token) == email
+
+    auth_service.revoke_session(token)
+
+    assert auth_service.get_session_email(token) is None
