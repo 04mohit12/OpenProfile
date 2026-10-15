@@ -120,6 +120,48 @@ def test_otp_resend_cooldown(monkeypatch):
         auth_service.request_otp("approved@example.com", "127.0.0.1")
 
 
+def test_otp_resend_allowed_after_cooldown(monkeypatch):
+    """A new OTP request is allowed after 60 seconds have elapsed."""
+    sent = []
+    email = "approved@example.com"
+    client_ip = "127.0.0.1"
+
+    monkeypatch.setattr(
+        auth_service,
+        "_send_otp_email",
+        lambda email, otp: sent.append(email),
+    )
+
+    # Avoid hourly limits interfering with the cooldown test.
+    monkeypatch.setattr(auth_service, "EMAIL_OTP_HOURLY_LIMIT", 20)
+    monkeypatch.setattr(auth_service, "IP_OTP_HOURLY_LIMIT", 20)
+
+    try:
+        with auth_db.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO auth_rate_limits
+                    (email, client_ip, requested_at)
+                VALUES (%s, %s, %s)
+                """,
+                (email, client_ip, time.time() - 60),
+            )
+
+        auth_service.request_otp(email, client_ip)
+
+        assert sent == [email]
+
+    finally:
+        with auth_db.get_connection() as conn:
+            conn.execute(
+                """
+                DELETE FROM auth_rate_limits
+                WHERE email = %s AND client_ip = %s
+                """,
+                (email, client_ip),
+            )
+
+
 def test_unapproved_email_does_not_send_otp(monkeypatch):
     """Unapproved addresses do not trigger an email."""
     sent = []
@@ -235,6 +277,48 @@ def test_ip_hourly_otp_limit(monkeypatch):
                 (email, client_ip),
             )
 
+
+def test_ip_hourly_limit_allows_last_permitted_request(monkeypatch):
+    """The tenth request is allowed when nine requests exist in the hour."""
+    sent = []
+    email = "approved@example.com"
+    client_ip = "127.0.0.1"
+    now = time.time()
+
+    monkeypatch.setattr(
+        auth_service,
+        "_send_otp_email",
+        lambda email, otp: sent.append(email),
+    )
+
+    # Prevent the email limit from interfering with the IP limit test.
+    monkeypatch.setattr(auth_service, "EMAIL_OTP_HOURLY_LIMIT", 20)
+
+    try:
+        with auth_db.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO auth_rate_limits
+                    (email, client_ip, requested_at)
+                SELECT %s, %s, %s
+                FROM generate_series(1, 9)
+                """,
+                (email, client_ip, now - 100),
+            )
+
+        auth_service.request_otp(email, client_ip)
+
+        assert sent == [email]
+
+    finally:
+        with auth_db.get_connection() as conn:
+            conn.execute(
+                """
+                DELETE FROM auth_rate_limits
+                WHERE email = %s AND client_ip = %s
+                """,
+                (email, client_ip),
+            )
 
 
 def test_cleanup_removes_expired_auth_state():
@@ -411,3 +495,51 @@ def test_session_token_expires_after_max_age(monkeypatch):
     result = auth_service.get_session_email(token)
 
     assert result is None
+
+
+def test_email_hourly_limit_allows_last_permitted_request(monkeypatch):
+    """The fifth request is allowed when four requests exist in the hour."""
+    sent = []
+    email = "approved@example.com"
+    client_ip = "127.0.0.1"
+    now = time.time()
+
+    monkeypatch.setattr(
+        auth_service,
+        "_send_otp_email",
+        lambda email, otp: sent.append(email),
+    )
+
+    try:
+        with auth_db.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO auth_rate_limits
+                    (email, client_ip, requested_at)
+                VALUES
+                    (%s, %s, %s),
+                    (%s, %s, %s),
+                    (%s, %s, %s),
+                    (%s, %s, %s)
+                """,
+                (
+                    email, client_ip, now - 100,
+                    email, client_ip, now - 200,
+                    email, client_ip, now - 300,
+                    email, client_ip, now - 400,
+                ),
+            )
+
+        auth_service.request_otp(email, client_ip)
+
+        assert sent == [email]
+
+    finally:
+        with auth_db.get_connection() as conn:
+            conn.execute(
+                """
+                DELETE FROM auth_rate_limits
+                WHERE email = %s AND client_ip = %s
+                """,
+                (email, client_ip),
+            )
