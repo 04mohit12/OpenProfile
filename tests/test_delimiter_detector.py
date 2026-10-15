@@ -118,3 +118,18 @@ def test_file_sample_size_is_bounded(tmp_path: Path):
 
     assert result["delimiter"] == "|"
     assert result["sample_rows"] <= 20
+
+
+def test_ordinary_text_with_spaces_does_not_detect_delimiter():
+    """Ordinary text values should not be mistaken for space-delimited rows."""
+    text = (
+        "In Progress\n"
+        "Not Started\n"
+        "Completed\n"
+    )
+
+    result = detect_delimiter(text)
+
+    assert result["delimiter"] is None
+    assert result["name"] == "Unknown"
+    assert result["needs_confirmation"] is True

@@ -47,6 +47,8 @@ def test_health_endpoint():
     assert response.json()["status"] == "ok"
 
 
+
+
 def test_txt_upload_detects_pipe_and_preserves_filename(
     monkeypatch, tmp_path
 ):
@@ -66,6 +68,38 @@ def test_txt_upload_detects_pipe_and_preserves_filename(
 
     assert source_path.is_file()
     assert metadata_path.is_file()
+
+
+def test_txt_upload_detects_space_delimiter(monkeypatch, tmp_path):
+    """Detect a space delimiter instead of treating the file as one column."""
+    monkeypatch.setattr(main, "STORAGE_DIR", tmp_path.resolve())
+
+    space_file = (
+        b"C001 Mohit Chennai Developer\n"
+        b"C002 Rahul Mumbai Tester\n"
+        b"C003 Pradeep Delhi Manager\n"
+    )
+
+    response = client.post(
+        "/api/v1/delimiters/detect",
+        files={
+            "file": (
+                "Testing_Space_Delimiter.txt",
+                space_file,
+                "text/plain",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+
+    result = response.json()
+    assert result["filename"] == "Testing_Space_Delimiter.txt"
+    assert result["delimiter"] == " "
+    assert result["name"] == "Space"
+    assert result["source_id"]
+
+
 
 
 def test_wrong_delimiter_returns_warning_without_profiling(
@@ -162,3 +196,35 @@ def test_missing_source_file_returns_404(
     )
 
     assert response.status_code == 404
+
+
+def test_txt_upload_with_ordinary_text_reports_no_delimiter(
+    monkeypatch, tmp_path
+):
+    """Ordinary text should not be reported as a delimited table."""
+    monkeypatch.setattr(main, "STORAGE_DIR", tmp_path.resolve())
+
+    ordinary_text = (
+        b"In Progress\n"
+        b"Not Started\n"
+        b"Completed\n"
+    )
+
+    response = client.post(
+        "/api/v1/delimiters/detect",
+        files={
+            "file": (
+                "Ordinary_Text.txt",
+                ordinary_text,
+                "text/plain",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+
+    result = response.json()
+    assert result["filename"] == "Ordinary_Text.txt"
+    assert result["delimiter"] is None
+    assert result["name"] == "Unknown"
+    assert result["source_id"]
