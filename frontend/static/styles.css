@@ -534,3 +534,327 @@ th:first-child, td:first-child { padding-left: 20px; }
     padding: 25px 20px;
   }
 }
+
+
+
+/* Theme preferences */
+:root {
+  color-scheme: light;
+  --login-bg: #f6f7fb;
+  --login-card: #ffffff;
+  --input-bg: #ffffff;
+  --table-head: #fafbff;
+  --hover-bg: #f8f8ff;
+  --overlay-bg: rgba(32, 36, 58, 0.48);
+}
+
+/* Dark theme palette */
+html[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #11131b;
+  --surface: #191c27;
+  --surface-soft: #202433;
+  --text: #edf0fb;
+  --muted: #aeb5cb;
+  --border: #34394d;
+
+  --primary: #a29aff;
+  --primary-dark: #8c82ff;
+  --primary-soft: #302b50;
+
+  --green: #68dfb8;
+  --green-soft: #173c32;
+  --amber: #f4c574;
+  --amber-soft: #40311d;
+  --blue: #8bbaff;
+  --blue-soft: #1d304e;
+
+  --shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+
+  --login-bg: #11131b;
+  --login-card: #191c27;
+  --input-bg: #141722;
+  --table-head: #222637;
+  --hover-bg: #282d40;
+  --overlay-bg: rgba(0, 0, 0, 0.72);
+}
+
+/* Theme toggle */
+.theme-toggle {
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.theme-toggle-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.theme-toggle-label {
+  font-size: 12px;
+}
+
+/* Main surfaces */
+html[data-theme="dark"] body,
+html[data-theme="dark"] .login-screen {
+  background: var(--bg);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .sidebar,
+html[data-theme="dark"] .panel,
+html[data-theme="dark"] .upload-panel,
+html[data-theme="dark"] .metric-card,
+html[data-theme="dark"] .explorer-panel,
+html[data-theme="dark"] .details-panel,
+html[data-theme="dark"] .login-card,
+html[data-theme="dark"] .preview-card,
+html[data-theme="dark"] .detail-panel,
+html[data-theme="dark"] .modal-card,
+html[data-theme="dark"] .dropdown-menu {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] .topbar {
+  background: var(--bg);
+  border-color: var(--border);
+}
+
+/* Text contrast */
+html[data-theme="dark"] .breadcrumb,
+html[data-theme="dark"] .breadcrumb strong,
+html[data-theme="dark"] .system-status,
+html[data-theme="dark"] .sidebar-status,
+html[data-theme="dark"] .nav-item,
+html[data-theme="dark"] .field-row label,
+html[data-theme="dark"] .metric-top,
+html[data-theme="dark"] .column-name,
+html[data-theme="dark"] td,
+html[data-theme="dark"] .detail-card strong,
+html[data-theme="dark"] .top-value-row strong {
+  color: var(--text);
+}
+
+html[data-theme="dark"] .workspace-label,
+html[data-theme="dark"] .section-kicker,
+html[data-theme="dark"] .breadcrumb span,
+html[data-theme="dark"] .page-heading p,
+html[data-theme="dark"] .panel-heading p,
+html[data-theme="dark"] .helper-text,
+html[data-theme="dark"] .muted-copy,
+html[data-theme="dark"] .metric-foot,
+html[data-theme="dark"] .dataset-identity p,
+html[data-theme="dark"] .table-footer,
+html[data-theme="dark"] .type-label,
+html[data-theme="dark"] .detail-card span,
+html[data-theme="dark"] .detail-note p,
+html[data-theme="dark"] .details-empty p,
+html[data-theme="dark"] .login-brand p,
+html[data-theme="dark"] .login-card > p,
+html[data-theme="dark"] .signed-in-email,
+html[data-theme="dark"] .login-footnote,
+html[data-theme="dark"] .sub-label {
+  color: var(--muted);
+}
+
+/* Navigation and buttons */
+html[data-theme="dark"] .nav-item:hover,
+html[data-theme="dark"] .nav-item.active {
+  background: var(--primary-soft);
+  color: #c8c1ff;
+}
+
+html[data-theme="dark"] .button-secondary,
+html[data-theme="dark"] .button-ghost,
+html[data-theme="dark"] .icon-button {
+  background: var(--surface-soft);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] .button-secondary:hover,
+html[data-theme="dark"] .button-ghost:hover,
+html[data-theme="dark"] .icon-button:hover {
+  background: var(--hover-bg);
+}
+
+/* Upload and delimiter workflow */
+html[data-theme="dark"] .dropzone {
+  background: var(--surface-soft);
+  color: var(--text);
+  border-color: #454b63;
+}
+
+html[data-theme="dark"] .dropzone:hover,
+html[data-theme="dark"] .dropzone.drag-over {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+}
+
+html[data-theme="dark"] .dropzone-subtitle,
+html[data-theme="dark"] .file-chip {
+  color: var(--muted);
+}
+
+html[data-theme="dark"] .file-chip,
+html[data-theme="dark"] .mini-stat,
+html[data-theme="dark"] .sample-wrap pre,
+html[data-theme="dark"] .search-field {
+  background: var(--input-bg);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+/* Inputs, selects and sample preview */
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] .sample-rows,
+html[data-theme="dark"] .login-card input,
+html[data-theme="dark"] .search-field input {
+  background: var(--input-bg);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] input::placeholder,
+html[data-theme="dark"] textarea::placeholder,
+html[data-theme="dark"] .search-field input::placeholder {
+  color: #a0a8c0;
+}
+
+html[data-theme="dark"] .mini-stat span,
+html[data-theme="dark"] .sample-wrap pre {
+  color: var(--muted);
+}
+
+/* Tables and column explorer */
+html[data-theme="dark"] thead,
+html[data-theme="dark"] th {
+  background: var(--table-head);
+  color: var(--muted);
+}
+
+html[data-theme="dark"] td,
+html[data-theme="dark"] th {
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] tr:hover {
+  background: var(--hover-bg);
+}
+
+html[data-theme="dark"] .type-pill {
+  background: var(--surface-soft);
+  color: #d5d9eb;
+}
+
+html[data-theme="dark"] .count-badge {
+  background: var(--primary-soft);
+  color: #d0caff;
+}
+
+html[data-theme="dark"] .details-button {
+  background: var(--primary-soft);
+  color: #d0caff;
+  border-color: #49436e;
+}
+
+html[data-theme="dark"] .details-button:hover {
+  background: #3a345e;
+}
+
+/* Column details and statistic cards */
+html[data-theme="dark"] .detail-card,
+html[data-theme="dark"] .top-value-row,
+html[data-theme="dark"] .detail-note,
+html[data-theme="dark"] .status-tag {
+  background: var(--surface-soft);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] .detail-note strong {
+  color: #c8c1ff;
+}
+
+html[data-theme="dark"] .type-mark,
+html[data-theme="dark"] .empty-icon,
+html[data-theme="dark"] .dataset-icon,
+html[data-theme="dark"] .avatar {
+  background: var(--primary-soft);
+  color: #d0caff;
+  border-color: #49436e;
+}
+
+html[data-theme="dark"] .progress-track {
+  background: #303548;
+}
+
+/* Status and quality indicators */
+html[data-theme="dark"] .status-success,
+html[data-theme="dark"] .quality-good {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+html[data-theme="dark"] .quality-medium {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+html[data-theme="dark"] .quality-low {
+  background: #48272e;
+  color: #ffabb4;
+}
+
+html[data-theme="dark"] .status-badge,
+html[data-theme="dark"] .type-badge {
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
+/* Dividers, borders and login */
+html[data-theme="dark"] .panel-heading,
+html[data-theme="dark"] .dataset-heading,
+html[data-theme="dark"] .explorer-heading,
+html[data-theme="dark"] .page-footer,
+html[data-theme="dark"] .login-footnote,
+html[data-theme="dark"] .workflow-panel,
+html[data-theme="dark"] .details-header,
+html[data-theme="dark"] .completeness-section {
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] .login-card {
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+}
+
+html[data-theme="dark"] .warning-panel {
+  background: #392d1d;
+  color: #f4cd8a;
+  border-color: #5b4728;
+}
+
+html[data-theme="dark"] .status-dot,
+html[data-theme="dark"] .footer-dot {
+  box-shadow: 0 0 0 3px rgba(104, 223, 184, 0.12);
+}
+
+/* Smaller screens */
+@media (max-width: 600px) {
+  .theme-toggle-label {
+    display: none;
+  }
+
+  .theme-toggle {
+    min-width: 36px;
+    padding-inline: 9px;
+  }
+}

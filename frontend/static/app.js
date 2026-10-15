@@ -1580,6 +1580,43 @@ function resetWorkspace() {
 // ------------------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Keep the user's theme choice across refreshes. Fall back to light mode.
+  const themeToggle = document.getElementById("themeToggle");
+  const themeIcon = themeToggle?.querySelector(".theme-toggle-icon");
+  const themeLabel = themeToggle?.querySelector(".theme-toggle-label");
+  const themeMeta = document.querySelector('meta[name="theme-color"]');
+
+  function applyTheme(theme) {
+    const isDark = theme === "dark";
+    document.documentElement.dataset.theme = isDark ? "dark" : "light";
+    if (themeIcon) themeIcon.textContent = isDark ? "☀" : "☾";
+    if (themeLabel) themeLabel.textContent = isDark ? "Light mode" : "Dark mode";
+    if (themeToggle) {
+      const label = isDark ? "Switch to light theme" : "Switch to dark theme";
+      themeToggle.setAttribute("aria-label", label);
+      themeToggle.setAttribute("title", label);
+    }
+    if (themeMeta) themeMeta.setAttribute("content", isDark ? "#11131b" : "#f6f7fb");
+  }
+
+  let savedTheme = "light";
+  try {
+    savedTheme = localStorage.getItem("openprofile-theme") || "light";
+  } catch {
+    // Storage may be unavailable in restricted browser contexts.
+  }
+  applyTheme(savedTheme === "dark" ? "dark" : "light");
+
+  themeToggle?.addEventListener("click", () => {
+    const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    applyTheme(nextTheme);
+    try {
+      localStorage.setItem("openprofile-theme", nextTheme);
+    } catch {
+      // Theme still works for this page even if persistence is unavailable.
+    }
+  });
+
   document.querySelectorAll(".nav-item").forEach(button => {
     button.addEventListener("click", () => navigateTo(button.dataset.view));
   });
