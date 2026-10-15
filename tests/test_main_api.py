@@ -228,3 +228,45 @@ def test_txt_upload_with_ordinary_text_reports_no_delimiter(
     assert result["delimiter"] is None
     assert result["name"] == "Unknown"
     assert result["source_id"]
+
+
+def test_confirm_space_delimiter_preserves_ordinary_text_as_one_column(
+    monkeypatch, tmp_path
+):
+    """Ordinary text with spaces should remain one column after confirmation."""
+    monkeypatch.setattr(main, "STORAGE_DIR", tmp_path.resolve())
+
+    ordinary_text = (
+        b"In Progress\n"
+        b"Not Started\n"
+        b"Completed\n"
+    )
+
+    response = client.post(
+        "/api/v1/delimiters/detect",
+        files={
+            "file": (
+                "Ordinary_Text.txt",
+                ordinary_text,
+                "text/plain",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    uploaded = response.json()
+
+    profile_response = client.post(
+        "/api/v1/delimiters/confirm-and-profile",
+        json={
+            "source_id": uploaded["source_id"],
+            "delimiter": " ",
+        },
+    )
+
+    assert profile_response.status_code == 200
+
+    result = profile_response.json()
+    assert result["profiling"]["total_rows"] == 3
+    assert result["profiling"]["total_columns"] == 1
+    assert result["confirmed_delimiter"] is None

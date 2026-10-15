@@ -846,6 +846,7 @@ def confirm_delimiter_and_profile(
         df = pl.read_csv(
             source_path,
             separator=parse_delimiter,
+            has_header=not single_column_mode,
             infer_schema=False,
             try_parse_dates=False,
             encoding="utf8",
