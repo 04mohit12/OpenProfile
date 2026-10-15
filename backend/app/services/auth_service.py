@@ -129,6 +129,7 @@ def _send_otp_email(email: str, otp: str) -> None:
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            "User-Agent": "OpenProfile/1.0",
         },
         method="POST",
     )
