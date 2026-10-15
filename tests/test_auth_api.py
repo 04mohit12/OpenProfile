@@ -116,3 +116,49 @@ def test_otp_verification_database_failure(monkeypatch):
 
     assert response.status_code == 503
     assert "Database unavailable" not in response.text
+
+
+def test_me_returns_401_when_session_database_fails(monkeypatch):
+    monkeypatch.setattr(
+        auth_service,
+        "get_session_email",
+        lambda token: None,
+    )
+
+    client.cookies.set(
+        "openprofile_session",
+        "test-session-token",
+    )
+
+    response = client.get("/api/v1/auth/me")
+
+    assert response.status_code == 401
+    assert "invalid or expired" in response.json()["detail"].lower()
+
+    client.cookies.clear()
+
+def test_session_lookup_database_failure_fails_closed(monkeypatch):
+    monkeypatch.setattr(
+        auth_service,
+        "_approved_emails",
+        lambda: {"approved@example.com"},
+    )
+
+    token = auth_service._serializer().dumps({
+        "email": "approved@example.com",
+        "sid": "test-session-id",
+        "iat": int(auth_service.time.time()),
+    })
+
+    def raise_database_error(session_id):
+        raise RuntimeError("Database unavailable")
+
+    monkeypatch.setattr(
+        auth_service.auth_db,
+        "get_session",
+        raise_database_error,
+    )
+
+    result = auth_service.get_session_email(token)
+
+    assert result is None
