@@ -1,5 +1,8 @@
 
 import hashlib
+import json
+import urllib.error
+import urllib.request
 import hmac
 import os
 import secrets
@@ -100,43 +103,47 @@ def _otp_digest(email: str, otp: str, salt: str) -> str:
 
 
 
+
 def _send_otp_email(email: str, otp: str) -> None:
-    host = _setting("SMTP_HOST", "smtp.gmail.com")
-    port = int(_setting("SMTP_PORT", "465"))
-    username = _setting("SMTP_USERNAME")
-    password = _setting("SMTP_APP_PASSWORD")
+    api_key = _setting("RESEND_API_KEY")
 
-    if not username or not password:
-        raise RuntimeError("SMTP credentials are not configured.")
+    if not api_key:
+        raise RuntimeError("Resend API key is not configured.")
 
-    message = EmailMessage()
-    message["Subject"] = "Your OpenProfile verification code"
-    message["From"] = username
-    message["To"] = email
-    message.set_content(
-        f"""Your OpenProfile verification code is: {otp}
+    payload = {
+        "from": "OpenProfile <onboarding@resend.dev>",
+        "to": [email],
+        "subject": "Your OpenProfile verification code",
+        "text": f"""Your OpenProfile verification code is: {otp}
 
 This code expires in 5 minutes and can only be used once.
 If you did not request this code, you can ignore this email.
-"""
+""",
+    }
+
+    request = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
     )
 
     try:
-        if port == 465:
-            with smtplib.SMTP_SSL(host, port, timeout=20) as server:
-                server.login(username, password)
-                server.send_message(message)
-        else:
-            with smtplib.SMTP(host, port, timeout=20) as server:
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
-                server.login(username, password)
-                server.send_message(message)
-    except (smtplib.SMTPException, OSError, TimeoutError):
+        with urllib.request.urlopen(request, timeout=20) as response:
+            if not 200 <= response.status < 300:
+                raise RuntimeError(
+                    "Unable to send the verification email. "
+                    "Please try again later."
+                )
+    except (urllib.error.HTTPError, urllib.error.URLError,
+            OSError, TimeoutError):
         raise RuntimeError(
             "Unable to send the verification email. Please try again later."
         ) from None
+
 
 
 
