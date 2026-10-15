@@ -387,3 +387,27 @@ def test_revoked_session_cannot_authenticate(monkeypatch):
     auth_service.revoke_session(token)
 
     assert auth_service.get_session_email(token) is None
+
+
+def test_session_token_expires_after_max_age(monkeypatch):
+    """A signed session token older than the maximum age is rejected."""
+    email = "approved@example.com"
+    session_id = "expired-token-session"
+
+    token = auth_service._serializer().dumps({
+        "email": email,
+        "sid": session_id,
+        "iat": int(time.time()),
+    })
+
+    monkeypatch.setattr(
+        auth_service,
+        "SESSION_TTL_SECONDS",
+        1,
+    )
+
+    time.sleep(1.1)
+
+    result = auth_service.get_session_email(token)
+
+    assert result is None
