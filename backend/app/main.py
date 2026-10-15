@@ -1,4 +1,4 @@
-﻿
+
 from pathlib import Path
 import json
 import os
@@ -144,11 +144,24 @@ def verify_login_otp(
     response: Response,
 ):
     """Verify the OTP and issue an authenticated session."""
-    if not auth_service.verify_otp(payload.email, payload.otp):
+
+    try:
+        is_valid = auth_service.verify_otp(
+            payload.email,
+            payload.otp,
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication service is temporarily unavailable.",
+        ) from None
+
+    if not is_valid:
         raise HTTPException(
             status_code=401,
             detail="Invalid or expired verification code.",
         )
+
 
     try:
         token = auth_service.create_session(payload.email)

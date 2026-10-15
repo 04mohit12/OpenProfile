@@ -94,3 +94,25 @@ def test_logout_clears_session_cookie(monkeypatch):
     assert "max-age=0" in response.headers["set-cookie"].lower()
 
     client.cookies.clear()
+
+
+def test_otp_verification_database_failure(monkeypatch):
+    def raise_database_error(email, otp):
+        raise RuntimeError("Database unavailable")
+
+    monkeypatch.setattr(
+        auth_service,
+        "verify_otp",
+        raise_database_error,
+    )
+
+    response = client.post(
+        "/api/v1/auth/verify-otp",
+        json={
+            "email": "approved@example.com",
+            "otp": "123456",
+        },
+    )
+
+    assert response.status_code == 503
+    assert "Database unavailable" not in response.text
