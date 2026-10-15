@@ -105,6 +105,7 @@ def _otp_digest(email: str, otp: str, salt: str) -> str:
 
 
 
+
 def _send_otp_email(email: str, otp: str) -> None:
     api_key = _setting("RESEND_API_KEY")
 
@@ -115,11 +116,11 @@ def _send_otp_email(email: str, otp: str) -> None:
         "from": "OpenProfile <onboarding@resend.dev>",
         "to": [email],
         "subject": "Your OpenProfile verification code",
-        "text": f"""Your OpenProfile verification code is: {otp}
-
-This code expires in 5 minutes and can only be used once.
-If you did not request this code, you can ignore this email.
-""",
+        "text": (
+            f"Your OpenProfile verification code is: {otp}\n\n"
+            "This code expires in 5 minutes and can only be used once.\n"
+            "If you did not request this code, you can ignore this email."
+        ),
     }
 
     request = urllib.request.Request(
@@ -134,25 +135,47 @@ If you did not request this code, you can ignore this email.
 
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
+            response_body = response.read().decode(
+                "utf-8", errors="replace"
+            )
+
             if not 200 <= response.status < 300:
-                print(f"Resend returned unexpected HTTP status: {response.status}")
+                print(
+                    f"Resend API error: HTTP {response.status} - "
+                    f"{response_body}",
+                    flush=True,
+                )
                 raise RuntimeError(
                     "Unable to send the verification email. "
                     "Please try again later."
                 )
 
+            print(
+                f"Resend accepted OTP email request: HTTP {response.status}",
+                flush=True,
+            )
+
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        print(f"Resend API error: HTTP {exc.code} - {detail}")
+        print(
+            f"Resend API error: HTTP {exc.code} - {detail}",
+            flush=True,
+        )
         raise RuntimeError(
-            "Unable to send the verification email. Please try again later."
+            "Unable to send the verification email. "
+            "Please try again later."
         ) from None
 
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
-        print(f"Resend connection error: {type(exc).__name__}")
+        print(
+            f"Resend connection error: {type(exc).__name__}",
+            flush=True,
+        )
         raise RuntimeError(
-            "Unable to send the verification email. Please try again later."
+            "Unable to send the verification email. "
+            "Please try again later."
         ) from None
+
 
 
 
