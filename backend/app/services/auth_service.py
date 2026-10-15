@@ -7,7 +7,7 @@ import smtplib
 import threading
 import time
 from email.message import EmailMessage
-
+from backend.app.services import auth_db
 from dotenv import load_dotenv
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
@@ -141,12 +141,9 @@ If you did not request this code, you can ignore this email.
 
 
 
-def request_otp(email: str, client_ip: str = "unknown") -> None:
-    """Send an OTP to an approved email address.
 
-    Returns the same result for approved and unapproved addresses
-    to avoid exposing the allowlist through the API.
-    """
+def request_otp(email: str, client_ip: str = "unknown") -> None:
+    """Send an OTP to an approved email address without exposing the allowlist."""
     normalized = email.strip().lower()
 
     if not normalized or len(normalized) > 254 or "@" not in normalized:
@@ -156,125 +153,88 @@ def request_otp(email: str, client_ip: str = "unknown") -> None:
         return
 
     now = time.time()
-    request_key = (normalized, client_ip)
+    request_id = secrets.token_urlsafe(16)
 
-    with _lock:
-        _cleanup_expired_auth_state(now)
+    # Enforce persistent cooldown and rate limits.
+    auth_db.reserve_otp_request(
+        email=normalized,
+        client_ip=client_ip,
+        now=now,
+        cooldown_seconds=OTP_RESEND_COOLDOWN_SECONDS,
+        rate_window_seconds=OTP_RATE_WINDOW_SECONDS,
+        email_hourly_limit=EMAIL_OTP_HOURLY_LIMIT,
+        ip_hourly_limit=IP_OTP_HOURLY_LIMIT,
+    )
 
-        email_requests = [
-            timestamp
-            for timestamp in _email_otp_requests.get(normalized, [])
-            if now - timestamp < OTP_RATE_WINDOW_SECONDS
-        ]
-        ip_requests = [
-            timestamp
-            for timestamp in _ip_otp_requests.get(client_ip, [])
-            if now - timestamp < OTP_RATE_WINDOW_SECONDS
-        ]
+    # Register this request before sending the email.
+    try:
+        auth_db.register_otp_request(normalized, request_id)
+    except Exception:
+        try:
+            auth_db.cancel_otp_request(normalized, client_ip, now)
+        except Exception:
+            pass
 
-        _email_otp_requests[normalized] = email_requests
-        _ip_otp_requests[client_ip] = ip_requests
-
-        previous = _last_otp_request.get(request_key, 0)
-        if now - previous < OTP_RESEND_COOLDOWN_SECONDS:
-            raise ValueError(
-                "Please wait before requesting another verification code."
-            )
-
-        if len(email_requests) >= EMAIL_OTP_HOURLY_LIMIT:
-            raise ValueError(
-                "Too many verification requests for this email. Try again later."
-            )
-
-        if len(ip_requests) >= IP_OTP_HOURLY_LIMIT:
-            raise ValueError(
-                "Too many verification requests from this address. Try again later."
-            )
-
-        # Reserve the request before sending to limit concurrent requests.
-        _last_otp_request[request_key] = now
-        reservation_time = now
-        request_id = secrets.token_urlsafe(16)
-        _otp_request_generation[normalized] = request_id
-        _email_otp_requests[normalized] = email_requests + [now]
-        _ip_otp_requests[client_ip] = ip_requests + [now]
+        raise RuntimeError(
+            "Unable to store the verification request. Please try again later."
+        ) from None
 
     otp = f"{secrets.randbelow(1_000_000):06d}"
     salt = secrets.token_hex(16)
 
     try:
         _send_otp_email(normalized, otp)
-
     except Exception:
-        with _lock:
-            # Remove only the reservation created by this request.
-            if _last_otp_request.get(request_key) == reservation_time:
-                _last_otp_request.pop(request_key, None)
-
-            _email_otp_requests[normalized] = [
-                timestamp
-                for timestamp in _email_otp_requests.get(normalized, [])
-                if timestamp != reservation_time
-            ]
-            _ip_otp_requests[client_ip] = [
-                timestamp
-                for timestamp in _ip_otp_requests.get(client_ip, [])
-                if timestamp != reservation_time
-            ]
-
+        try:
+            auth_db.cancel_otp_request(normalized, client_ip, now)
+        except Exception:
+            pass
         raise RuntimeError(
             "Unable to send the verification email. Please try again later."
         ) from None
 
 
-    with _lock:
-    # Only the latest request may register a valid OTP.
-        if _otp_request_generation.get(normalized) != request_id:
-            return
+    try:
+        saved = auth_db.save_otp_if_latest(
+            email=normalized,
+            request_id=request_id,
+            digest=_otp_digest(normalized, otp, salt),
+            salt=salt,
+            expires_at=time.time() + OTP_TTL_SECONDS,
+        )
+    except Exception:
+        raise RuntimeError(
+            "Unable to store the verification code. Please try again later."
+        ) from None
 
-        _otps[normalized] = {
-            "digest": _otp_digest(normalized, otp, salt),
-            "salt": salt,
-            "expires": time.time() + OTP_TTL_SECONDS,
-            "attempts": 0,
-        }
+    if not saved:
+        # A newer request superseded this one.
+        return
+
+
 
 
 
 def verify_otp(email: str, otp: str) -> bool:
-    """Validate a six-digit OTP once, with expiry and attempt limits."""
+    """Validate and consume a six-digit OTP stored in PostgreSQL."""
     normalized = email.strip().lower()
 
     if not otp.isdigit() or len(otp) != 6:
         return False
 
-    with _lock:
-        record = _otps.get(normalized)
+    return auth_db.verify_otp_record(
+        email=normalized,
+        otp=otp,
+        digest_for_salt=lambda salt: _otp_digest(
+            normalized, otp, salt
+        ),
+        max_attempts=OTP_MAX_ATTEMPTS,
+    )
 
-        if not record:
-            return False
-
-        if time.time() >= record["expires"]:
-            _otps.pop(normalized, None)
-            return False
-
-        record["attempts"] += 1
-
-        expected = record["digest"]
-        actual = _otp_digest(normalized, otp, record["salt"])
-
-        if not hmac.compare_digest(expected, actual):
-            if record["attempts"] >= OTP_MAX_ATTEMPTS:
-                _otps.pop(normalized, None)
-            return False
-
-        # A successful code is single-use.
-        _otps.pop(normalized, None)
-        return True
 
 
 def create_session(email: str) -> str:
-    """Create a signed session token and register it for revocation."""
+    """Create a signed session token and persist it for revocation."""
     normalized = email.strip().lower()
 
     if normalized not in _approved_emails():
@@ -282,6 +242,7 @@ def create_session(email: str) -> str:
 
     session_id = secrets.token_urlsafe(24)
     now = int(time.time())
+    expires_at = now + SESSION_TTL_SECONDS
 
     token = _serializer().dumps({
         "email": normalized,
@@ -289,11 +250,11 @@ def create_session(email: str) -> str:
         "iat": now,
     })
 
-    with _lock:
-        _sessions[session_id] = {
-            "email": normalized,
-            "expires": now + SESSION_TTL_SECONDS,
-        }
+    auth_db.save_session(
+        session_id=session_id,
+        email=normalized,
+        expires_at=expires_at,
+    )
 
     return token
 
@@ -314,15 +275,26 @@ def get_session_email(token: str) -> str | None:
     if not isinstance(email, str) or not isinstance(session_id, str):
         return None
 
-    with _lock:
-        session = _sessions.get(session_id)
+    try:
+        session = auth_db.get_session(session_id)
+    except Exception:
+        # Fail closed if the session store is unavailable.
+        return None
 
-        if not session or time.time() >= session["expires"]:
-            _sessions.pop(session_id, None)
-            return None
+    if session is None:
+        return None
 
-        if session["email"] != email:
-            return None
+    stored_email, expires_at = session
+
+    if time.time() >= expires_at:
+        try:
+            auth_db.delete_session(session_id)
+        except Exception:
+            pass
+        return None
+
+    if stored_email != email:
+        return None
 
     if email not in _approved_emails():
         return None
@@ -341,6 +313,10 @@ def revoke_session(token: str) -> None:
         return
 
     session_id = payload.get("sid")
+
     if isinstance(session_id, str):
-        with _lock:
-            _sessions.pop(session_id, None)
+        try:
+            auth_db.delete_session(session_id)
+        except Exception:
+            # Logout should still clear the browser cookie.
+            pass

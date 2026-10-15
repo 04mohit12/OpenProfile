@@ -4,7 +4,7 @@ import time
 import pytest
 
 from backend.app.services import auth_service
-
+from backend.app.services import auth_db
 
 
 @pytest.fixture(autouse=True)
@@ -25,7 +25,18 @@ def reset_auth_state(monkeypatch):
         "SESSION_SECRET",
         "test-secret-that-is-at-least-32-characters-long",
     )
-
+    with auth_db.get_connection() as conn:
+        conn.execute(
+            "DELETE FROM auth_otps WHERE email = %s",
+            ("approved@example.com",),
+        )
+        conn.execute(
+            """
+            DELETE FROM auth_rate_limits
+            WHERE email = %s OR client_ip = %s
+            """,
+            ("approved@example.com", "127.0.0.1"),
+        )
     yield
 
     with auth_service._lock:
@@ -64,11 +75,15 @@ def test_otp_expires(monkeypatch):
 
     auth_service.request_otp("approved@example.com", "127.0.0.1")
 
-    with auth_service._lock:
-        auth_service._otps["approved@example.com"]["expires"] = (
-            time.time() - 1
+    with auth_db.get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE auth_otps
+            SET expires_at = %s
+            WHERE email = %s
+            """,
+            (time.time() - 1, "approved@example.com"),
         )
-
     assert not auth_service.verify_otp("approved@example.com", "123456")
 
 
@@ -119,9 +134,14 @@ def test_unapproved_email_does_not_send_otp(monkeypatch):
 
 
 
+
 def test_email_hourly_otp_limit(monkeypatch):
     """Reject OTP requests after the hourly email limit."""
     sent = []
+    email = "approved@example.com"
+    client_ip = "127.0.0.1"
+    now = time.time()
+
     monkeypatch.setattr(
         auth_service, "_send_otp_email",
         lambda email, otp: sent.append(email),
@@ -130,18 +150,43 @@ def test_email_hourly_otp_limit(monkeypatch):
         auth_service, "EMAIL_OTP_HOURLY_LIMIT", 5,
     )
 
-    # Simulate five previous requests within the hour.
-    now = time.time()
-    auth_service._email_otp_requests["approved@example.com"] = [
-        now - 10, now - 20, now - 30, now - 40, now - 50
-    ]
+    try:
+        with auth_db.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO auth_rate_limits
+                    (email, client_ip, requested_at)
+                VALUES
+                    (%s, %s, %s),
+                    (%s, %s, %s),
+                    (%s, %s, %s),
+                    (%s, %s, %s),
+                    (%s, %s, %s)
+                """,
+                (
+                    email, client_ip, now - 100,
+                    email, client_ip, now - 200,
+                    email, client_ip, now - 300,
+                    email, client_ip, now - 400,
+                    email, client_ip, now - 500,
+                ),
+            )
 
-    with pytest.raises(ValueError, match="email"):
-        auth_service.request_otp(
-            "approved@example.com", "127.0.0.1"
-        )
+        with pytest.raises(ValueError, match="email"):
+            auth_service.request_otp(email, client_ip)
 
-    assert sent == []
+        assert sent == []
+
+    finally:
+        with auth_db.get_connection() as conn:
+            conn.execute(
+                """
+                DELETE FROM auth_rate_limits
+                WHERE email = %s AND client_ip = %s
+                """,
+                (email, client_ip),
+            )
+
 
 
 
@@ -149,6 +194,10 @@ def test_email_hourly_otp_limit(monkeypatch):
 def test_ip_hourly_otp_limit(monkeypatch):
     """Reject OTP requests after the hourly IP limit."""
     sent = []
+    email = "approved@example.com"
+    client_ip = "127.0.0.1"
+    now = time.time()
+
     monkeypatch.setattr(
         auth_service, "_send_otp_email",
         lambda email, otp: sent.append(email),
@@ -156,18 +205,36 @@ def test_ip_hourly_otp_limit(monkeypatch):
     monkeypatch.setattr(
         auth_service, "IP_OTP_HOURLY_LIMIT", 10,
     )
+    monkeypatch.setattr(
+    auth_service, "EMAIL_OTP_HOURLY_LIMIT", 20,
+    )
+    try:
+        with auth_db.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO auth_rate_limits
+                    (email, client_ip, requested_at)
+                SELECT %s, %s, %s
+                FROM generate_series(1, 10)
+                """,
+                (email, client_ip, now - 100),
+            )
 
-    now = time.time()
-    auth_service._ip_otp_requests["127.0.0.1"] = [
-        now - (index + 1) * 10 for index in range(10)
-    ]
+        with pytest.raises(ValueError, match="address"):
+            auth_service.request_otp(email, client_ip)
 
-    with pytest.raises(ValueError, match="address"):
-        auth_service.request_otp(
-            "approved@example.com", "127.0.0.1"
-        )
+        assert sent == []
 
-    assert sent == []
+    finally:
+        with auth_db.get_connection() as conn:
+            conn.execute(
+                """
+                DELETE FROM auth_rate_limits
+                WHERE email = %s AND client_ip = %s
+                """,
+                (email, client_ip),
+            )
+
 
 
 def test_cleanup_removes_expired_auth_state():
@@ -210,10 +277,10 @@ def test_cleanup_removes_expired_auth_state():
     assert "127.0.0.1" not in auth_service._ip_otp_requests
 
 
+
 def test_older_otp_request_cannot_overwrite_newer_request(monkeypatch):
-    """A stale request must not replace the latest OTP record."""
+    """A stale request must not replace the latest OTP in PostgreSQL."""
     email = "approved@example.com"
-    now = time.time()
 
     old_request_id = "old-request"
     new_request_id = "new-request"
@@ -221,39 +288,46 @@ def test_older_otp_request_cannot_overwrite_newer_request(monkeypatch):
     old_otp = "111111"
     new_otp = "222222"
 
-    old_salt = "old-salt"
-    new_salt = "new-salt"
-
     monkeypatch.setattr(
-        auth_service, "_otp_digest",
+        auth_service,
+        "_otp_digest",
         lambda email, otp, salt: f"{otp}:{salt}",
     )
 
-    with auth_service._lock:
-        auth_service._otp_request_generation[email] = new_request_id
-        auth_service._otps[email] = {
-            "digest": auth_service._otp_digest(
-                email, new_otp, new_salt
-            ),
-            "salt": new_salt,
-            "expires": now + auth_service.OTP_TTL_SECONDS,
-            "attempts": 0,
-        }
+    # Register the older request first, then the newer request.
+    auth_db.register_otp_request(email, old_request_id)
+    auth_db.register_otp_request(email, new_request_id)
 
-    # Simulate the older request finishing after the newer request.
-    with auth_service._lock:
-        if (
-            auth_service._otp_request_generation.get(email)
-            == old_request_id
-        ):
-            auth_service._otps[email] = {
-                "digest": auth_service._otp_digest(
-                    email, old_otp, old_salt
-                ),
-                "salt": old_salt,
-                "expires": now + auth_service.OTP_TTL_SECONDS,
-                "attempts": 0,
-            }
+    # The older request must not overwrite the newer OTP.
+    old_saved = auth_db.save_otp_if_latest(
+        email=email,
+        request_id=old_request_id,
+        digest=auth_service._otp_digest(email, old_otp, "old-salt"),
+        salt="old-salt",
+        expires_at=time.time() + auth_service.OTP_TTL_SECONDS,
+    )
 
-    assert auth_service._otp_request_generation[email] == new_request_id
-    assert auth_service._otps[email]["salt"] == new_salt
+    assert old_saved is False
+
+    # The latest request should be allowed to save its OTP.
+    new_saved = auth_db.save_otp_if_latest(
+        email=email,
+        request_id=new_request_id,
+        digest=auth_service._otp_digest(email, new_otp, "new-salt"),
+        salt="new-salt",
+        expires_at=time.time() + auth_service.OTP_TTL_SECONDS,
+    )
+
+    assert new_saved is True
+
+    with auth_db.get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT digest, salt
+            FROM auth_otps
+            WHERE email = %s
+            """,
+            (email,),
+        ).fetchone()
+
+    assert row == ("222222:new-salt", "new-salt")
