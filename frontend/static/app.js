@@ -788,7 +788,11 @@ async function applyDelimiter() {
 
   el.delimiterValue.textContent = formatDelimiter(selected);
 
-  const mismatch = detected !== undefined && selected !== detected;
+  const mismatch =
+    detected !== undefined &&
+    detected !== null &&
+    detected !== "" &&
+    selected !== detected;
 
   if (mismatch) {
     el.warningPanel.classList.remove("hidden");
