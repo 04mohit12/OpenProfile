@@ -331,3 +331,26 @@ def test_older_otp_request_cannot_overwrite_newer_request(monkeypatch):
         ).fetchone()
 
     assert row == ("222222:new-salt", "new-salt")
+
+
+def test_expired_database_session_is_rejected(monkeypatch):
+    """An expired PostgreSQL session must not authenticate."""
+    email = "approved@example.com"
+    session_id = "expired-test-session"
+    now = int(time.time())
+
+    token = auth_service._serializer().dumps({
+        "email": email,
+        "sid": session_id,
+        "iat": now,
+    })
+
+    monkeypatch.setattr(
+        auth_db,
+        "get_session",
+        lambda sid: (email, time.time() - 10),
+    )
+
+    result = auth_service.get_session_email(token)
+
+    assert result is None
