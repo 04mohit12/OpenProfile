@@ -114,7 +114,7 @@ def _send_otp_email(email: str, otp: str) -> None:
 
     payload = {
         "from": "OpenProfile <onboarding@resend.dev>",
-        "to": [email],
+        "to": ["delivered@resend.dev"],
         "subject": "Your OpenProfile verification code",
         "text": (
             f"Your OpenProfile verification code is: {otp}\n\n"
