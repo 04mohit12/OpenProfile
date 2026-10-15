@@ -104,6 +104,7 @@ def _otp_digest(email: str, otp: str, salt: str) -> str:
 
 
 
+
 def _send_otp_email(email: str, otp: str) -> None:
     api_key = _setting("RESEND_API_KEY")
 
@@ -134,18 +135,24 @@ If you did not request this code, you can ignore this email.
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
             if not 200 <= response.status < 300:
+                print(f"Resend returned unexpected HTTP status: {response.status}")
                 raise RuntimeError(
                     "Unable to send the verification email. "
                     "Please try again later."
                 )
-    except (urllib.error.HTTPError, urllib.error.URLError,
-            OSError, TimeoutError):
+
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        print(f"Resend API error: HTTP {exc.code} - {detail}")
         raise RuntimeError(
             "Unable to send the verification email. Please try again later."
         ) from None
 
-
-
+    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        print(f"Resend connection error: {type(exc).__name__}")
+        raise RuntimeError(
+            "Unable to send the verification email. Please try again later."
+        ) from None
 
 
 
